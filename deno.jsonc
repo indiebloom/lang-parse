@@ -1,0 +1,6 @@
+{
+  "imports": {
+    "$std/": "https://deno.land/std@0.222.0/",
+    "$chai": "https://deno.land/x/chai@v4.3.6/lib/chai.js"
+  }
+}
