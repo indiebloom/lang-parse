@@ -1,0 +1,21 @@
+# This file specifies the files and directories that should be ignored when publishing the package to npm.
+
+# Ignore the source code files
+/src
+/types
+
+# Ignore the test files
+/tests
+
+# Ignore configuration files
+.babelrc
+.eslintrc.json
+tsconfig.json
+
+# Ignore the README file
+README.md
+
+# Ignore the npm package itself
+*.tgz
+
+# Ignore any other files or directories that are not necessary for the published package
