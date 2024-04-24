@@ -2,7 +2,7 @@ export type SuggestionGroup = {
   /**
    * The unique key for the group
    */
-  key: any;
+  key: string;
   /**
    * The importance of the suggestion group, relative to other groups
    * and ungrouped suggestions. May be used to determine display order.

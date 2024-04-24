@@ -1,17 +1,37 @@
-import {
+import type {
   Expression,
   LiteralExpression,
   Suggestion,
   SuggestionObj,
   UnionExpression,
-} from "./types";
+} from "./types/index.ts";
 
-export type ParseResult<State, CustomSuggestion = {}> = {
+import { castImmutable, type Immutable, produce } from "./deps.ts";
+
+export type ParseResult<State, CustomSuggestion = object> = {
+  /** The prefix of the input string that matches the expression */
   matchingPrefix: string;
+  /** The suffix of the input string that does not match the expression */
   nonMatchingSuffix: string;
+  /**
+   * True if the entire input string matches the expression. This is a convenience
+   * property that is equivalent to `matchingPrefix === input` or `nonMatchingSuffix.length === 0`.
+   */
   isCompleteMatch: boolean;
+  /**
+   * True if there is no way to append more tokens to the input string
+   * to to match more subexpressions in this branch of the expression tree.
+   */
   isTerminal: boolean;
-  state: State;
+  /**
+   * The state extracted from the input string by the branch of the expression
+   * tree that matched the matchingPrefix.
+   */
+  state: Immutable<State>;
+  /**
+   * Suggestions for continuing the input string to produce a larger
+   * matchingPrefix
+   */
   suggestions: Suggestion<CustomSuggestion>[];
 };
 
@@ -23,7 +43,7 @@ export type ParseResult<State, CustomSuggestion = {}> = {
  * @param input The input string to parse
  * @returns A @type {ParseResult} containing the output of the parse operation
  */
-export function parse<State = {}, CustomSuggestion = {}>(
+export function parse<State = object, CustomSuggestion = object>(
   expression: Expression<State, CustomSuggestion>,
   initialState: State,
   input: string,
@@ -82,8 +102,8 @@ function emptyResult<State, CustomSuggestion>(
     matchingPrefix: "",
     nonMatchingSuffix: input,
     isCompleteMatch: input.length === 0,
-    isTerminal: false,
-    state: state,
+    isTerminal: true,
+    state: castImmutable(state),
     suggestions: [],
   };
 }
@@ -132,10 +152,7 @@ function _parse<State, CustomSuggestion>(
 ): ParseResult<State, CustomSuggestion>[] {
   switch (expression.type) {
     case "literal":
-      const result = parseLiteral(expression, state, input);
-      return result.matchingPrefix.length > 0 || result.suggestions.length > 0
-        ? [result]
-        : [];
+      return [parseLiteral(expression, state, input)];
     case "union":
       return parseUnion(expression, state, input);
   }
@@ -146,7 +163,37 @@ function parseLiteral<State, CustomSuggestion>(
   state: State,
   input: string,
 ): ParseResult<State, CustomSuggestion> {
-  return emptyResult(state, input);
+  const regexp = typeof expression.regexp === "function"
+    ? expression.regexp(castImmutable(state))
+    : expression.regexp;
+  // Ensure that we only match from the start of the input
+  const finalRegexp = regexp.source.startsWith("^")
+    ? regexp
+    : new RegExp(`^${regexp.source}`);
+  const match = finalRegexp.exec(input);
+  if (match) {
+    const [matchingPrefix, ...matchGroups] = match;
+    const updatedState = produce(
+      state,
+      (draftState) => expression.stateUpdater(draftState, matchGroups),
+    );
+    return {
+      matchingPrefix,
+      nonMatchingSuffix: input.slice(matchingPrefix.length),
+      isCompleteMatch: input.length === matchingPrefix.length,
+      isTerminal: true,
+      state: castImmutable(updatedState),
+      suggestions: [],
+    };
+  }
+
+  const suggestions = typeof expression.suggestions === "function"
+    ? expression.suggestions(castImmutable(state), input)
+    : expression.suggestions;
+  return {
+    ...emptyResult(state, input),
+    suggestions,
+  };
 }
 
 function parseUnion<State, CustomSuggestion>(
