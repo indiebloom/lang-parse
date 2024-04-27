@@ -81,6 +81,32 @@ Deno.test("literal expression evaluation", async (t) => {
   );
 
   await t.step(
+    "should not match empty input when regex does not match empty input",
+    () => {
+      const result = parse(
+        literal(/boop/, {
+          stateUpdater: buildMatchRecorder(),
+          suggestions: ["boop"],
+        }),
+        INITIAL_STATE,
+        "",
+      );
+
+      assertObjectEquals(
+        result,
+        {
+          matchingPart: "",
+          remainder: "",
+          state: INITIAL_STATE,
+          suggestions: [{
+            label: "boop",
+          }],
+        } satisfies ParseResult<TestState>,
+      );
+    },
+  );
+
+  await t.step(
     "should match when the regex matches the start of the input",
     () => {
       const result = parse(
@@ -382,6 +408,38 @@ Deno.test("sequence expression evaluation", async (t) => {
         {
           matchingPart: "",
           remainder: "foba",
+          state: INITIAL_STATE,
+          suggestions: [{
+            label: "foo",
+          }],
+        } satisfies ParseResult<TestState>,
+      );
+    },
+  );
+
+  await t.step(
+    "should not match empty input the first child expression does not match empty input",
+    () => {
+      const result = parse(
+        sequence(
+          literal(/foo/, {
+            stateUpdater: buildMatchRecorder(0),
+            suggestions: ["foo"],
+          }),
+          literal(/bar/, {
+            stateUpdater: buildMatchRecorder(1),
+            suggestions: ["bar"],
+          }),
+        ),
+        INITIAL_STATE,
+        "",
+      );
+
+      assertObjectEquals(
+        result,
+        {
+          matchingPart: "",
+          remainder: "",
           state: INITIAL_STATE,
           suggestions: [{
             label: "foo",

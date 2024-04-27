@@ -85,10 +85,9 @@ export function parse<State = object, CustomSuggestion = object>(
 
 function emptyEvalResult<State, CustomSuggestion>(
   state: State,
-  input: string,
 ): EvalResult<State, CustomSuggestion> {
   return {
-    isMatch: input === "",
+    isMatch: false,
     matchingPartLength: 0,
     state,
     suggestions: [],
@@ -179,7 +178,7 @@ function parseLiteral<State, CustomSuggestion>(
     ? expression.suggestions(castImmutable(state), input)
     : expression.suggestions;
   return {
-    ...emptyEvalResult(state, input),
+    ...emptyEvalResult(state),
     suggestions: suggestions.map(suggestionAsObj),
   };
 }
