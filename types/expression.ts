@@ -3,7 +3,8 @@ import { Suggestion } from "./suggestion.ts";
 
 export type Expression<State = object, CustomSuggestion = object> =
   | LiteralExpression<State, CustomSuggestion>
-  | UnionExpression<State>;
+  | SequenceExpression<State, CustomSuggestion>
+  | UnionExpression<State, CustomSuggestion>;
 
 /** Matches a regular expression. This is the primary match type. */
 export type LiteralExpression<State = object, CustomSuggestion = object> = {
@@ -18,8 +19,14 @@ export type LiteralExpression<State = object, CustomSuggestion = object> = {
   stateUpdater: (state: Draft<State>, matchGroups: string[]) => void;
 };
 
+/** Matches an ordered sequence of expressions */
+export type SequenceExpression<State, CustomSuggestion> = {
+  type: "sequence";
+  sequence: Expression<State, CustomSuggestion>[];
+};
+
 /** Matches any of several alternative expressions */
-export type UnionExpression<State> = {
+export type UnionExpression<State, CustomSuggestion> = {
   type: "union";
-  alternatives: Expression<State>[];
+  alternates: Expression<State, CustomSuggestion>[];
 };

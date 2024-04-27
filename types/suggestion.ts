@@ -46,31 +46,3 @@ export type SuggestionObj<CustomSuggestion = {}> = {
 export type Suggestion<CustomSuggestion> =
   | string
   | SuggestionObj<CustomSuggestion>;
-
-/** Output produced by running the parser for an expression on an input string */
-export type ParseResult<State, CustomSuggestion = {}> = {
-  /** The prefix of the input string that matches the expression */
-  matchingPrefix: string;
-  /** The suffix of the input string that does not match the expression */
-  nonMatchingSuffix: string;
-  /**
-   * True if the entire input string matches the expression. This is a convenience
-   * property that is equivalent to `matchingPrefix === input` or `nonMatchingSuffix.length === 0`.
-   */
-  isCompleteMatch: boolean;
-  /**
-   * True if there is no way to append more characters to the input string
-   * to grow the matching prefix.
-   */
-  isTerminal: boolean;
-  /**
-   * The state extracted from the input string by the branch of the expression
-   * tree that matched the matchingPrefix.
-   */
-  state: State;
-  /**
-   * Suggestions for continuing the input string to produce a larger
-   * matchingPrefix
-   */
-  suggestions: Suggestion<CustomSuggestion>[];
-};

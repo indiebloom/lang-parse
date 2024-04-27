@@ -1,33 +1,26 @@
 import type {
   Expression,
   LiteralExpression,
+  ParseResult,
+  SequenceExpression,
   Suggestion,
   SuggestionObj,
   UnionExpression,
 } from "./types/index.ts";
 
-import { castImmutable, type Immutable, produce } from "./deps.ts";
+import { castImmutable, produce } from "./deps.ts";
+import { sequence } from "./expression.ts";
 
-export type ParseResult<State, CustomSuggestion = object> = {
-  /** The prefix of the input string that matches the expression */
-  matchingPrefix: string;
-  /** The suffix of the input string that does not match the expression */
-  nonMatchingSuffix: string;
-  /**
-   * True if the entire input string matches the expression. This is a convenience
-   * property that is equivalent to `matchingPrefix === input` or `nonMatchingSuffix.length === 0`.
-   */
-  isCompleteMatch: boolean;
-  /**
-   * True if there is no way to append more tokens to the input string
-   * to to match more subexpressions in this branch of the expression tree.
-   */
-  isTerminal: boolean;
+type EvalResult<State, CustomSuggestion> = {
+  /** True if the entire evaluted expression matches some prefix of the input */
+  isMatch: boolean;
+  /** The length of the prefix of the input string that matches the expression */
+  matchingPartLength: number;
   /**
    * The state extracted from the input string by the branch of the expression
    * tree that matched the matchingPrefix.
    */
-  state: Immutable<State>;
+  state: State;
   /**
    * Suggestions for continuing the input string to produce a larger
    * matchingPrefix
@@ -48,23 +41,21 @@ export function parse<State = object, CustomSuggestion = object>(
   initialState: State,
   input: string,
 ): ParseResult<State, CustomSuggestion> {
-  // TODO: Make inner parse fn return a matchingPrefixLen instead of separate matchingPrefix, nonMatchingSuffix, and isCompleteMatch
-  // for efficiency
   const allResults = _parse(expression, initialState, input);
   if (allResults.length === 0) {
-    return emptyResult(initialState, input);
+    throw new Error("The provided expression did not produce any results");
   }
 
   const longestMatchLength = allResults.map((result) =>
-    result.matchingPrefix.length
+    result.matchingPartLength
   ).reduce((a, b) => Math.max(a, b));
   const longestMatchResults = allResults.filter((result) =>
-    result.matchingPrefix.length === longestMatchLength
+    result.matchingPartLength === longestMatchLength
   );
-  const stateResult = longestMatchResults.find((result) => result.isTerminal) ??
+  const stateResult = longestMatchResults.find((result) => result.isMatch) ??
     longestMatchResults[0];
 
-  // TODO: suggestions matching against suffix prefix
+  // TODO: suggestions matching against remainder prefix
 
   const mergedSuggestions = Object.values(longestMatchResults.reduce<
     Record<string, SuggestionObj<CustomSuggestion>>
@@ -85,25 +76,21 @@ export function parse<State = object, CustomSuggestion = object>(
   }, {}));
 
   return {
-    matchingPrefix: longestMatchResults[0].matchingPrefix,
-    nonMatchingSuffix: longestMatchResults[0].nonMatchingSuffix,
-    isCompleteMatch: longestMatchResults[0].isCompleteMatch,
-    isTerminal: longestMatchResults[0].isTerminal,
+    matchingPart: input.slice(0, longestMatchResults[0].matchingPartLength),
+    remainder: input.slice(longestMatchResults[0].matchingPartLength),
     state: stateResult.state,
     suggestions: mergedSuggestions,
   };
 }
 
-function emptyResult<State, CustomSuggestion>(
+function emptyEvalResult<State, CustomSuggestion>(
   state: State,
   input: string,
-): ParseResult<State, CustomSuggestion> {
+): EvalResult<State, CustomSuggestion> {
   return {
-    matchingPrefix: "",
-    nonMatchingSuffix: input,
-    isCompleteMatch: input.length === 0,
-    isTerminal: true,
-    state: castImmutable(state),
+    isMatch: input === "",
+    matchingPartLength: 0,
+    state,
     suggestions: [],
   };
 }
@@ -149,10 +136,12 @@ function _parse<State, CustomSuggestion>(
   expression: Expression<State, CustomSuggestion>,
   state: State,
   input: string,
-): ParseResult<State, CustomSuggestion>[] {
+): EvalResult<State, CustomSuggestion>[] {
   switch (expression.type) {
     case "literal":
       return [parseLiteral(expression, state, input)];
+    case "sequence":
+      return parseSequence(expression, state, input);
     case "union":
       return parseUnion(expression, state, input);
   }
@@ -162,7 +151,7 @@ function parseLiteral<State, CustomSuggestion>(
   expression: LiteralExpression<State, CustomSuggestion>,
   state: State,
   input: string,
-): ParseResult<State, CustomSuggestion> {
+): EvalResult<State, CustomSuggestion> {
   const regexp = typeof expression.regexp === "function"
     ? expression.regexp(castImmutable(state))
     : expression.regexp;
@@ -170,19 +159,18 @@ function parseLiteral<State, CustomSuggestion>(
   const finalRegexp = regexp.source.startsWith("^")
     ? regexp
     : new RegExp(`^${regexp.source}`);
+
   const match = finalRegexp.exec(input);
   if (match) {
-    const [matchingPrefix, ...matchGroups] = match;
+    const [matchingPart, ...matchGroups] = match;
     const updatedState = produce(
       state,
       (draftState) => expression.stateUpdater(draftState, matchGroups),
     );
     return {
-      matchingPrefix,
-      nonMatchingSuffix: input.slice(matchingPrefix.length),
-      isCompleteMatch: input.length === matchingPrefix.length,
-      isTerminal: true,
-      state: castImmutable(updatedState),
+      matchingPartLength: matchingPart.length,
+      isMatch: true,
+      state: updatedState,
       suggestions: [],
     };
   }
@@ -191,15 +179,61 @@ function parseLiteral<State, CustomSuggestion>(
     ? expression.suggestions(castImmutable(state), input)
     : expression.suggestions;
   return {
-    ...emptyResult(state, input),
-    suggestions,
+    ...emptyEvalResult(state, input),
+    suggestions: suggestions.map(suggestionAsObj),
   };
 }
 
-function parseUnion<State, CustomSuggestion>(
-  expression: UnionExpression<State>,
+function parseSequence<State, CustomSuggestion>(
+  expression: SequenceExpression<State, CustomSuggestion>,
   state: State,
   input: string,
-): ParseResult<State, CustomSuggestion>[] {
-  return [];
+): EvalResult<State, CustomSuggestion>[] {
+  if (expression.sequence.length === 0) {
+    throw new Error("Sequence expression must have at least one child");
+  }
+
+  const firstChildResults = _parse(expression.sequence[0], state, input);
+  if (expression.sequence.length === 1) {
+    return firstChildResults;
+  }
+
+  const rest = expression.sequence.slice(1);
+
+  return firstChildResults.flatMap((firstChildResult) => {
+    if (!firstChildResult.isMatch) {
+      // If the first child expression did not match the input, we stop exploring
+      // the branch here
+      return [firstChildResult];
+    }
+
+    // Otherwise, recursively parse the remainder of the input against the rest of
+    // the child expressions
+    const remainder = input.slice(firstChildResult.matchingPartLength);
+    const restResults = _parse(
+      sequence(...rest),
+      firstChildResult.state,
+      remainder,
+    );
+
+    return restResults.map((restResult) => ({
+      ...restResult,
+      matchingPartLength: firstChildResult.matchingPartLength +
+        restResult.matchingPartLength,
+    }));
+  });
+}
+
+function parseUnion<State, CustomSuggestion>(
+  expression: UnionExpression<State, CustomSuggestion>,
+  state: State,
+  input: string,
+): EvalResult<State, CustomSuggestion>[] {
+  if (expression.alternates.length === 0) {
+    throw new Error("Union expression must have at least one child");
+  }
+
+  return expression.alternates.flatMap((alternate) =>
+    _parse(alternate, state, input)
+  );
 }
