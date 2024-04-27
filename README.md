@@ -152,7 +152,7 @@ sequence(
     union(
         literal(/tod(ay)?\b\s*/, { suggestions: ['today'] }),
         literal(/tom(orrow)?\b\s*/, { suggestions: ['tomorrow'] }),
-    )
+    ),
     literal(/(at\b\s*)?/),
     literal(/(\d{1,2})(a|p)m\b\s*/, { suggestions: ['6pm'] }),
 )
