@@ -10,7 +10,7 @@ export type SuggestionGroup = {
   priority?: number;
 };
 
-export type SuggestionObj<CustomSuggestion = {}> = {
+export type SuggestionObj<CustomSuggestion = object> = {
   /** The string for display to the user */
   label: string;
   /**
