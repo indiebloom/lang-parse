@@ -4,7 +4,8 @@ import { Suggestion } from "./suggestion.ts";
 export type Expression<State = object, CustomSuggestion = object> =
   | LiteralExpression<State, CustomSuggestion>
   | SequenceExpression<State, CustomSuggestion>
-  | UnionExpression<State, CustomSuggestion>;
+  | UnionExpression<State, CustomSuggestion>
+  | DynamicExpression<State, CustomSuggestion>;
 
 /** Matches a regular expression. This is the primary match type. */
 export type LiteralExpression<State = object, CustomSuggestion = object> = {
@@ -29,4 +30,10 @@ export type SequenceExpression<State, CustomSuggestion> = {
 export type UnionExpression<State, CustomSuggestion> = {
   type: "union";
   alternates: Expression<State, CustomSuggestion>[];
+};
+
+/** Generates an exprssion based on the current state */
+export type DynamicExpression<State, CustomSuggestion> = {
+  type: "dynamic";
+  fn: (state: Immutable<State>) => Expression<State, CustomSuggestion>;
 };

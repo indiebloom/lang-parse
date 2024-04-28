@@ -1,5 +1,6 @@
 import { Draft, Immutable } from "./deps.ts";
 import {
+  DynamicExpression,
   Expression,
   LiteralExpression,
   SequenceExpression,
@@ -9,6 +10,7 @@ import { Suggestion } from "./types/suggestion.ts";
 
 const NO_OP = () => {};
 const EMPTY_LITERAL = literal(/(?:)/);
+const TERMINAL_LITERAL = literal(/$/);
 
 export function literal<State = object, CustomSuggestion = object>(
   regexp: RegExp | ((state: Immutable<State>) => RegExp),
@@ -53,6 +55,15 @@ export function union<State = object, CustomSuggestion = object>(
   };
 }
 
+export function dynamic<State = object, CustomSuggestion = object>(
+  fn: (state: Immutable<State>) => Expression<State, CustomSuggestion>,
+): DynamicExpression<State, CustomSuggestion> {
+  return {
+    type: "dynamic",
+    fn,
+  };
+}
+
 /**
  * Makes a given expression optional.
  * @param expression The expression to make optional
@@ -66,4 +77,45 @@ export function optional<State = object, CustomSuggestion = object>(
     EMPTY_LITERAL as Expression<State, CustomSuggestion>,
     expression,
   );
+}
+
+/**
+ * Dynamically chooses between two possible expression to evaluate, based on the current
+ * state.
+ * @param options
+ * @returns The expression chosen based on the given conditional options and the
+ * current state.
+ */
+export function conditional<State = object, CustomSuggestion = object>(
+  options: {
+    condition: (state: Immutable<State>) => boolean;
+    /** The expression to evaluate if the condition is satisfied */
+    ifTrue: Expression<State, CustomSuggestion>;
+    /**
+     * Defines the expression to evaluate if the condition is not satisfied.
+     * One of:
+     * - "matchEmpty" (DEFAULT): If the condition evaluates to false,
+     *   this expression vacuously matches the empty string, allowing any expressions that
+     *   follow this one in the branch of the expression tree to be matched against the
+     *   input, as though this expression were not present in the tree at all.
+     * - "noMatch": If the condition evaluates to false, the expression does does not
+     *   match the input, and its branch of the expression tree is not explored further, as
+     *   though this expression were a LiteralExpression whose regex did not match.
+     * - A custom expression
+     */
+    ifFalse?: "matchEmpty" | "notMatch" | Expression<State, CustomSuggestion>;
+  },
+): Expression<State, CustomSuggestion> {
+  return dynamic((state) => {
+    const isConditionSatisfied = options.condition(state);
+    if (isConditionSatisfied) {
+      return options.ifTrue;
+    } else if (!options.ifFalse || options.ifFalse === "matchEmpty") {
+      return EMPTY_LITERAL as Expression<State, CustomSuggestion>;
+    } else if (options.ifFalse === "notMatch") {
+      return TERMINAL_LITERAL as Expression<State, CustomSuggestion>;
+    } else {
+      return options.ifFalse;
+    }
+  });
 }

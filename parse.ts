@@ -10,6 +10,7 @@ import type {
 
 import { castImmutable, produce } from "./deps.ts";
 import { sequence } from "./expression.ts";
+import { DynamicExpression } from "./types/expression.ts";
 
 type EvalResult<State, CustomSuggestion> = {
   /** True if the entire evaluted expression matches some prefix of the input */
@@ -143,6 +144,8 @@ function _parse<State, CustomSuggestion>(
       return parseSequence(expression, state, input);
     case "union":
       return parseUnion(expression, state, input);
+    case "dynamic":
+      return parseDynamic(expression, state, input);
   }
 }
 
@@ -235,4 +238,13 @@ function parseUnion<State, CustomSuggestion>(
   return expression.alternates.flatMap((alternate) =>
     _parse(alternate, state, input)
   );
+}
+
+function parseDynamic<State, CustomSuggestion>(
+  expression: DynamicExpression<State, CustomSuggestion>,
+  state: State,
+  input: string,
+): EvalResult<State, CustomSuggestion>[] {
+  const dynamicExpression = expression.fn(castImmutable(state));
+  return _parse(dynamicExpression, state, input);
 }

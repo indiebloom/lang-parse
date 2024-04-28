@@ -1,6 +1,13 @@
 import { assertEquals } from "https://deno.land/std@0.223.0/assert/mod.ts";
-import { Draft } from "./deps.ts";
-import { literal, optional, sequence, union } from "./expression.ts";
+import { Draft, Immutable } from "./deps.ts";
+import {
+  conditional,
+  dynamic,
+  literal,
+  optional,
+  sequence,
+  union,
+} from "./expression.ts";
 import { parse } from "./mod.ts";
 import { ParseResult } from "./types/parse.ts";
 
@@ -554,6 +561,85 @@ Deno.test("sequence expression evaluation", async (t) => {
   );
 });
 
+Deno.test("dynamic expression evaluation", async (t) => {
+  const testExp = sequence(
+    optional(
+      literal(/test/, {
+        stateUpdater: buildMatchRecorder(0),
+        suggestions: ["test"],
+      }),
+    ),
+    dynamic((state: Immutable<TestState>) => {
+      if (state.matchingExpressions.includes(0)) {
+        return literal(/foo/, {
+          stateUpdater: buildMatchRecorder(1),
+          suggestions: ["foo"],
+        });
+      } else {
+        return literal(/bar/, {
+          stateUpdater: buildMatchRecorder(2),
+          suggestions: ["bar"],
+        });
+      }
+    }),
+  );
+
+  await t.step("should choose the expression based on the state", () => {
+    const result1 = parse(testExp, INITIAL_STATE, "testfoo");
+    assertObjectEquals(
+      result1,
+      {
+        matchingPart: "testfoo",
+        remainder: "",
+        state: { matchingExpressions: [0, 1] },
+        suggestions: [],
+      } satisfies ParseResult<TestState>,
+    );
+
+    const result2 = parse(testExp, INITIAL_STATE, "foo");
+    assertObjectEquals(
+      result2,
+      {
+        matchingPart: "",
+        remainder: "foo",
+        state: INITIAL_STATE,
+        suggestions: [
+          {
+            label: "bar",
+          },
+          {
+            label: "test",
+          },
+        ],
+      } satisfies ParseResult<TestState>,
+    );
+
+    const result3 = parse(testExp, INITIAL_STATE, "bar");
+    assertObjectEquals(
+      result3,
+      {
+        matchingPart: "bar",
+        remainder: "",
+        state: { matchingExpressions: [2] },
+        suggestions: [],
+      } satisfies ParseResult<TestState>,
+    );
+
+    const result4 = parse(testExp, INITIAL_STATE, "testbar");
+    assertObjectEquals(
+      result4,
+      {
+        matchingPart: "test",
+        remainder: "bar",
+        state: { matchingExpressions: [0] },
+        suggestions: [{
+          label: "foo",
+        }],
+      } satisfies ParseResult<TestState>,
+    );
+  });
+});
+
 Deno.test("optional expression evaluation", async (t) => {
   await t.step("should match when the optional expression matches", () => {
     const result = parse(
@@ -630,6 +716,130 @@ Deno.test("optional expression evaluation", async (t) => {
           matchingPart: "bar",
           remainder: "",
           state: { matchingExpressions: [1] },
+          suggestions: [],
+        } satisfies ParseResult<TestState>,
+      );
+    },
+  );
+});
+
+Deno.test("conditional expression evaluation", async (t) => {
+  await t.step(
+    "should evaluate the ifTrue expression if the condition is satisified",
+    () => {
+      const result = parse(
+        conditional({
+          condition: (state: Immutable<TestState>) =>
+            state.matchingExpressions.includes(0),
+          ifTrue: literal(/foo/, {
+            stateUpdater: buildMatchRecorder(1),
+          }),
+        }),
+        { matchingExpressions: [0] } satisfies TestState,
+        "foo",
+      );
+
+      assertObjectEquals(
+        result,
+        {
+          matchingPart: "foo",
+          remainder: "",
+          state: { matchingExpressions: [0, 1] },
+          suggestions: [],
+        } satisfies ParseResult<TestState>,
+      );
+    },
+  );
+
+  await t.step(
+    "should match the empty string by default if the condition is not satisified",
+    () => {
+      const result = parse(
+        sequence(
+          conditional({
+            condition: (state: Immutable<TestState>) =>
+              state.matchingExpressions.includes(0),
+            ifTrue: literal(/foo/, {
+              stateUpdater: buildMatchRecorder(1),
+            }),
+          }),
+          literal(/bar/, {
+            stateUpdater: buildMatchRecorder(2),
+          }),
+        ),
+        INITIAL_STATE,
+        "bar",
+      );
+
+      assertObjectEquals(
+        result,
+        {
+          matchingPart: "bar",
+          remainder: "",
+          state: { matchingExpressions: [2] },
+          suggestions: [],
+        } satisfies ParseResult<TestState>,
+      );
+    },
+  );
+
+  await t.step(
+    "should not match if the condition is not satisified and ifFalse=notMatch",
+    () => {
+      const result = parse(
+        sequence(
+          conditional({
+            condition: (state: Immutable<TestState>) =>
+              state.matchingExpressions.includes(0),
+            ifTrue: literal(/foo/, {
+              stateUpdater: buildMatchRecorder(1),
+            }),
+            ifFalse: "notMatch",
+          }),
+          literal(/bar/, {
+            stateUpdater: buildMatchRecorder(2),
+          }),
+        ),
+        INITIAL_STATE,
+        "bar",
+      );
+
+      assertObjectEquals(
+        result,
+        {
+          matchingPart: "",
+          remainder: "bar",
+          state: INITIAL_STATE,
+          suggestions: [],
+        } satisfies ParseResult<TestState>,
+      );
+    },
+  );
+
+  await t.step(
+    "should evaluate the custom ifFalse expression if the condition is not satisified",
+    () => {
+      const result = parse(
+        conditional({
+          condition: (state: Immutable<TestState>) =>
+            state.matchingExpressions.includes(0),
+          ifTrue: literal(/foo/, {
+            stateUpdater: buildMatchRecorder(1),
+          }),
+          ifFalse: literal(/bar/, {
+            stateUpdater: buildMatchRecorder(2),
+          }),
+        }),
+        INITIAL_STATE,
+        "bar",
+      );
+
+      assertObjectEquals(
+        result,
+        {
+          matchingPart: "bar",
+          remainder: "",
+          state: { matchingExpressions: [2] },
           suggestions: [],
         } satisfies ParseResult<TestState>,
       );
