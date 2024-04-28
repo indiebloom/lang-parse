@@ -8,6 +8,7 @@ import {
 import { Suggestion } from "./types/suggestion.ts";
 
 const NO_OP = () => {};
+const EMPTY_LITERAL = literal(/(?:)/);
 
 export function literal<State = object, CustomSuggestion = object>(
   regexp: RegExp | ((state: Immutable<State>) => RegExp),
@@ -50,4 +51,19 @@ export function union<State = object, CustomSuggestion = object>(
     type: "union",
     alternates,
   };
+}
+
+/**
+ * Makes a given expression optional.
+ * @param expression The expression to make optional
+ * @returns A union expression with two alternates: 1) the given expression, and 2) an expression
+ * that vacuously matches the empty string.
+ */
+export function optional<State = object, CustomSuggestion = object>(
+  expression: Expression<State, CustomSuggestion>,
+): Expression<State, CustomSuggestion> {
+  return union(
+    EMPTY_LITERAL as Expression<State, CustomSuggestion>,
+    expression,
+  );
 }

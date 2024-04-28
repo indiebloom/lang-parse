@@ -1,6 +1,6 @@
 import { assertEquals } from "https://deno.land/std@0.223.0/assert/mod.ts";
 import { Draft } from "./deps.ts";
-import { literal, sequence, union } from "./expression.ts";
+import { literal, optional, sequence, union } from "./expression.ts";
 import { parse } from "./mod.ts";
 import { ParseResult } from "./types/parse.ts";
 
@@ -547,6 +547,89 @@ Deno.test("sequence expression evaluation", async (t) => {
           matchingPart: "foobar",
           remainder: "",
           state: { matchingExpressions: [1, 2] },
+          suggestions: [],
+        } satisfies ParseResult<TestState>,
+      );
+    },
+  );
+});
+
+Deno.test("optional expression evaluation", async (t) => {
+  await t.step("should match when the optional expression matches", () => {
+    const result = parse(
+      optional(literal(/foo/, {
+        stateUpdater: buildMatchRecorder(),
+        suggestions: ["foo"],
+      })),
+      INITIAL_STATE,
+      "foo",
+    );
+
+    assertObjectEquals(
+      result,
+      {
+        matchingPart: "foo",
+        remainder: "",
+        state: { matchingExpressions: [0] },
+        suggestions: [],
+      } satisfies ParseResult<TestState>,
+    );
+  });
+
+  await t.step(
+    "should match and contribute suggestions when the optional expression does not match",
+    () => {
+      const result = parse(
+        sequence(
+          optional(literal(/foo/, {
+            stateUpdater: buildMatchRecorder(0),
+            suggestions: ["foo"],
+          })),
+          literal(/bar/, {
+            stateUpdater: buildMatchRecorder(1),
+            suggestions: ["bar"],
+          }),
+        ),
+        INITIAL_STATE,
+        "boop",
+      );
+
+      assertObjectEquals(
+        result,
+        {
+          matchingPart: "",
+          remainder: "boop",
+          state: INITIAL_STATE,
+          suggestions: [{ label: "bar" }, { label: "foo" }],
+        } satisfies ParseResult<TestState>,
+      );
+    },
+  );
+
+  await t.step(
+    "should match when the optional expression does not match",
+    () => {
+      const result = parse(
+        sequence(
+          optional(literal(/foo/, {
+            stateUpdater: buildMatchRecorder(0),
+            suggestions: ["foo"],
+          })),
+          literal(/bar/, {
+            stateUpdater: buildMatchRecorder(1),
+            suggestions: ["bar"],
+          }),
+        ),
+        INITIAL_STATE,
+        "bar",
+      );
+
+      assertObjectEquals(
+        result,
+        {
+          matchingPart: "bar",
+          remainder: "",
+          state: { matchingExpressions: [1] },
           suggestions: [],
         } satisfies ParseResult<TestState>,
       );
