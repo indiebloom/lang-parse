@@ -1,24 +1,16 @@
-import { assertEquals } from "https://deno.land/std@0.223.0/assert/mod.ts";
 import { Draft, Immutable } from "./deps.ts";
 import {
   conditional,
   dynamic,
   literal,
   optional,
+  permutations,
   sequence,
   union,
 } from "./expression.ts";
 import { parse } from "./mod.ts";
+import { assertObjectEquals } from "./testUtil.ts";
 import { ParseResult } from "./types/parse.ts";
-
-const pp = (o: object) => JSON.stringify(o, null, 2);
-
-const assertObjectEquals = (actual: object, expected: object) =>
-  assertEquals(
-    actual,
-    expected,
-    `Expected\n${pp(expected)}\nbut got\n${pp(actual)}`,
-  );
 
 type TestState = {
   matchingExpressions: number[];
@@ -480,12 +472,15 @@ Deno.test("sequence expression evaluation", async (t) => {
         "foobarbaz",
       );
 
-      assertObjectEquals(result, {
-        matchingPart: "foobarbaz",
-        remainder: "",
-        state: { matchingExpressions: [0, 1, 2] },
-        suggestions: [],
-      } as ParseResult<TestState>);
+      assertObjectEquals(
+        result,
+        {
+          matchingPart: "foobarbaz",
+          remainder: "",
+          state: { matchingExpressions: [0, 1, 2] },
+          suggestions: [],
+        } satisfies ParseResult<TestState>,
+      );
     },
   );
 
@@ -513,14 +508,17 @@ Deno.test("sequence expression evaluation", async (t) => {
         "fooboopbaz",
       );
 
-      assertObjectEquals(result, {
-        matchingPart: "foo",
-        remainder: "boopbaz",
-        state: { matchingExpressions: [0] },
-        suggestions: [{
-          label: "bar",
-        }],
-      } as ParseResult<TestState>);
+      assertObjectEquals(
+        result,
+        {
+          matchingPart: "foo",
+          remainder: "boopbaz",
+          state: { matchingExpressions: [0] },
+          suggestions: [{
+            label: "bar",
+          }],
+        } satisfies ParseResult<TestState>,
+      );
     },
   );
 
@@ -605,10 +603,10 @@ Deno.test("dynamic expression evaluation", async (t) => {
         state: INITIAL_STATE,
         suggestions: [
           {
-            label: "bar",
+            label: "test",
           },
           {
-            label: "test",
+            label: "bar",
           },
         ],
       } satisfies ParseResult<TestState>,
@@ -686,7 +684,7 @@ Deno.test("optional expression evaluation", async (t) => {
           matchingPart: "",
           remainder: "boop",
           state: INITIAL_STATE,
-          suggestions: [{ label: "bar" }, { label: "foo" }],
+          suggestions: [{ label: "foo" }, { label: "bar" }],
         } satisfies ParseResult<TestState>,
       );
     },
@@ -840,6 +838,348 @@ Deno.test("conditional expression evaluation", async (t) => {
           matchingPart: "bar",
           remainder: "",
           state: { matchingExpressions: [2] },
+          suggestions: [],
+        } satisfies ParseResult<TestState>,
+      );
+    },
+  );
+});
+
+Deno.test("evaluation of permutations", async (t) => {
+  await t.step(
+    "Should vacuously match an empty string when all terms are optional",
+    () => {
+      const expr = sequence(
+        permutations(
+          {
+            optionalMembers: [
+              literal(/foo/, {
+                stateUpdater: buildMatchRecorder(0),
+                suggestions: ["foo"],
+              }),
+              literal(/bar/, {
+                stateUpdater: buildMatchRecorder(1),
+                suggestions: ["bar"],
+              }),
+            ],
+          },
+        ),
+        literal(/baz/, {
+          stateUpdater: buildMatchRecorder(2),
+          suggestions: ["baz"],
+        }),
+      );
+
+      const result1 = parse(expr, INITIAL_STATE, "boop");
+      assertObjectEquals(
+        result1,
+        {
+          matchingPart: "",
+          remainder: "boop",
+          state: INITIAL_STATE,
+          suggestions: [{ label: "foo" }, { label: "bar" }, { label: "baz" }],
+        } satisfies ParseResult<TestState>,
+      );
+
+      const result2 = parse(expr, INITIAL_STATE, "baz");
+      assertObjectEquals(
+        result2,
+        {
+          matchingPart: "baz",
+          remainder: "",
+          state: { matchingExpressions: [2] },
+          suggestions: [],
+        } satisfies ParseResult<TestState>,
+      );
+    },
+  );
+
+  await t.step("Should be correct when given a single required term", () => {
+    const expr = permutations(
+      {
+        requiredMembers: [literal(/foo/, {
+          stateUpdater: buildMatchRecorder(0),
+          suggestions: ["foo"],
+        })],
+      },
+    );
+
+    const result1 = parse(expr, INITIAL_STATE, "foobar");
+    assertObjectEquals(
+      result1,
+      {
+        matchingPart: "foo",
+        remainder: "bar",
+        state: { matchingExpressions: [0] },
+        suggestions: [],
+      } satisfies ParseResult<TestState>,
+    );
+
+    const result2 = parse(expr, INITIAL_STATE, "barfoo");
+    assertObjectEquals(
+      result2,
+      {
+        matchingPart: "",
+        remainder: "barfoo",
+        state: INITIAL_STATE,
+        suggestions: [{ label: "foo" }],
+      } satisfies ParseResult<TestState>,
+    );
+  });
+
+  await t.step("Should be correct when given a single optional term", () => {
+    const expr = sequence(
+      permutations(
+        {
+          optionalMembers: [literal(/foo/, {
+            stateUpdater: buildMatchRecorder(0),
+            suggestions: ["foo"],
+          })],
+        },
+      ),
+      literal(/bar/, {
+        stateUpdater: buildMatchRecorder(1),
+        suggestions: ["bar"],
+      }),
+    );
+
+    const result1 = parse(expr, INITIAL_STATE, "foobar");
+    assertObjectEquals(
+      result1,
+      {
+        matchingPart: "foobar",
+        remainder: "",
+        state: { matchingExpressions: [0, 1] },
+        suggestions: [],
+      } satisfies ParseResult<TestState>,
+    );
+
+    const result2 = parse(expr, INITIAL_STATE, "barfoo");
+    assertObjectEquals(
+      result2,
+      {
+        matchingPart: "bar",
+        remainder: "foo",
+        state: { matchingExpressions: [1] },
+        suggestions: [],
+      } satisfies ParseResult<TestState>,
+    );
+  });
+
+  await t.step("Should not match the same term more than once", () => {
+    const expr = permutations(
+      {
+        requiredMembers: [
+          literal(/foo/, {
+            stateUpdater: buildMatchRecorder(0),
+            suggestions: ["foo"],
+          }),
+        ],
+        optionalMembers: [
+          literal(/bar/, {
+            stateUpdater: buildMatchRecorder(1),
+            suggestions: ["bar"],
+          }),
+        ],
+      },
+    );
+
+    const result1 = parse(expr, INITIAL_STATE, "foofoobar");
+    assertObjectEquals(
+      result1,
+      {
+        matchingPart: "foo",
+        remainder: "foobar",
+        state: { matchingExpressions: [0] },
+        suggestions: [{
+          label: "bar",
+        }],
+      } satisfies ParseResult<TestState>,
+    );
+
+    const result2 = parse(expr, INITIAL_STATE, "barfoobar");
+    assertObjectEquals(
+      result2,
+      {
+        matchingPart: "barfoo",
+        remainder: "bar",
+        state: { matchingExpressions: [1, 0] },
+        suggestions: [],
+      } satisfies ParseResult<TestState>,
+    );
+  });
+
+  await t.step("Should match several required terms out of order", () => {
+    const expr = permutations(
+      {
+        requiredMembers: [
+          literal(/foo/, {
+            stateUpdater: buildMatchRecorder(0),
+          }),
+          literal(/bar/, {
+            stateUpdater: buildMatchRecorder(1),
+          }),
+          literal(/baz/, {
+            stateUpdater: buildMatchRecorder(2),
+          }),
+        ],
+      },
+    );
+
+    const result1 = parse(expr, INITIAL_STATE, "barbazfooomg");
+    assertObjectEquals(
+      result1,
+      {
+        matchingPart: "barbazfoo",
+        remainder: "omg",
+        state: { matchingExpressions: [1, 2, 0] },
+        suggestions: [],
+      } satisfies ParseResult<TestState>,
+    );
+
+    const result2 = parse(expr, INITIAL_STATE, "bazbarfooomg");
+    assertObjectEquals(
+      result2,
+      {
+        matchingPart: "bazbarfoo",
+        remainder: "omg",
+        state: { matchingExpressions: [2, 1, 0] },
+        suggestions: [],
+      } satisfies ParseResult<TestState>,
+    );
+  });
+
+  await t.step("Should not match when any required term is missing", () => {
+    const expr = sequence(
+      permutations(
+        {
+          requiredMembers: [
+            literal(/foo/, {
+              stateUpdater: buildMatchRecorder(0),
+              suggestions: ["foo"],
+            }),
+            literal(/bar/, {
+              stateUpdater: buildMatchRecorder(1),
+            }),
+          ],
+        },
+      ),
+      literal(/boop/, {
+        stateUpdater: buildMatchRecorder(3),
+        suggestions: ["boop"],
+      }),
+    );
+
+    const result = parse(expr, INITIAL_STATE, "bar");
+    assertObjectEquals(
+      result,
+      {
+        matchingPart: "bar",
+        remainder: "",
+        state: { matchingExpressions: [1] },
+        suggestions: [
+          { label: "foo" },
+        ],
+      } satisfies ParseResult<TestState>,
+    );
+  });
+
+  await t.step(
+    "Should match when all required terms are present but some optional terms are missing",
+    () => {
+      const expr = sequence(
+        permutations(
+          {
+            requiredMembers: [
+              literal(/foo/, {
+                stateUpdater: buildMatchRecorder(0),
+              }),
+              literal(/bar/, {
+                stateUpdater: buildMatchRecorder(1),
+              }),
+            ],
+            optionalMembers: [
+              literal(/baz/, {
+                stateUpdater: buildMatchRecorder(2),
+              }),
+            ],
+          },
+        ),
+        literal(/boop/, { stateUpdater: buildMatchRecorder(3) }),
+      );
+
+      const result = parse(expr, INITIAL_STATE, "barfooboop");
+      assertObjectEquals(
+        result,
+        {
+          matchingPart: "barfooboop",
+          remainder: "",
+          state: { matchingExpressions: [1, 0, 3] },
+          suggestions: [],
+        } satisfies ParseResult<TestState>,
+      );
+    },
+  );
+
+  await t.step(
+    "Should match when all required and optional terms are present",
+    () => {
+      const expr = sequence(
+        permutations(
+          {
+            requiredMembers: [
+              literal(/foo/, {
+                stateUpdater: buildMatchRecorder(0),
+              }),
+              literal(/bar/, {
+                stateUpdater: buildMatchRecorder(1),
+              }),
+            ],
+            optionalMembers: [
+              literal(/baz/, {
+                stateUpdater: buildMatchRecorder(2),
+              }),
+            ],
+          },
+        ),
+        literal(/boop/, { stateUpdater: buildMatchRecorder(3) }),
+      );
+
+      const result = parse(expr, INITIAL_STATE, "barbazfooboop");
+      assertObjectEquals(
+        result,
+        {
+          matchingPart: "barbazfooboop",
+          remainder: "",
+          state: { matchingExpressions: [1, 2, 0, 3] },
+          suggestions: [],
+        } satisfies ParseResult<TestState>,
+      );
+    },
+  );
+});
+
+Deno.test("Evaluation of complex expressions ", async (t) => {
+  await t.step(
+    "should explore paths that include a non-optimal union expression alternate match",
+    () => {
+      const expr = sequence(
+        union(
+          literal(/foobar/, { stateUpdater: buildMatchRecorder(0) }),
+          literal(/foo/, { stateUpdater: buildMatchRecorder(1) }),
+        ),
+        literal(/bar/, { stateUpdater: buildMatchRecorder(2) }),
+        literal(/baz/, { stateUpdater: buildMatchRecorder(3) }),
+      );
+
+      const result = parse(expr, INITIAL_STATE, "foobarbaz");
+
+      assertObjectEquals(
+        result,
+        {
+          matchingPart: "foobarbaz",
+          remainder: "",
+          state: { matchingExpressions: [1, 2, 3] },
           suggestions: [],
         } satisfies ParseResult<TestState>,
       );

@@ -1,3 +1,3 @@
-export type * from "./expression.ts";
-export type * from "./parse.ts";
-export type * from "./suggestion.ts";
+export * from "./expression.ts";
+export * from "./parse.ts";
+export * from "./suggestion.ts";

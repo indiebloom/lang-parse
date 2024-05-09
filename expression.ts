@@ -1,10 +1,10 @@
-import { Draft, Immutable } from "./deps.ts";
+import { crypto, Draft, Immutable } from "./deps.ts";
 import {
   DynamicExpression,
   Expression,
+  ExpressionGenerator,
+  ExpressionWithId,
   LiteralExpression,
-  SequenceExpression,
-  UnionExpression,
 } from "./types/expression.ts";
 import { Suggestion } from "./types/suggestion.ts";
 
@@ -31,9 +31,11 @@ export function literal<State = object, CustomSuggestion = object>(
 
 export function sequence<State = object, CustomSuggestion = object>(
   ...sequence: Expression<State, CustomSuggestion>[]
-): SequenceExpression<State, CustomSuggestion> {
+): Expression<State, CustomSuggestion> {
   if (sequence.length === 0) {
     throw new Error("Sequence expression must have at least one child");
+  } else if (sequence.length === 1) {
+    return sequence[0];
   }
 
   return {
@@ -44,9 +46,11 @@ export function sequence<State = object, CustomSuggestion = object>(
 
 export function union<State = object, CustomSuggestion = object>(
   ...alternates: Expression<State, CustomSuggestion>[]
-): UnionExpression<State, CustomSuggestion> {
+): Expression<State, CustomSuggestion> {
   if (alternates.length === 0) {
     throw new Error("Union expression must have at least one child");
+  } else if (alternates.length === 1) {
+    return alternates[0];
   }
 
   return {
@@ -56,7 +60,7 @@ export function union<State = object, CustomSuggestion = object>(
 }
 
 export function dynamic<State = object, CustomSuggestion = object>(
-  fn: (state: Immutable<State>) => Expression<State, CustomSuggestion>,
+  fn: ExpressionGenerator<State, CustomSuggestion>,
 ): DynamicExpression<State, CustomSuggestion> {
   return {
     type: "dynamic",
@@ -118,4 +122,120 @@ export function conditional<State = object, CustomSuggestion = object>(
       return options.ifFalse;
     }
   });
+}
+
+/**
+ * Produces an expression that matches any permutation of the given expressions.
+ * E.g. if options.requiredMembers = [`A`, `B`] and options.optionalMembers = [`c`]
+ *
+ * Then the resulting expression will match inputs that match `A`, `B`, and `C`
+ * in any of the following orders:
+ * - `A` `B` `C`
+ * - `A` `C` `B`
+ * - `B` `A` `C`
+ * - `B` `C` `A`
+ * - `C` `A` `B`
+ * - `C` `B` `A`
+ * - `A` `B`
+ * - `B` `A`
+ *
+ * NOTE: A `permutations` expression consisting of `n` member expressions may produce
+ * an expression subgraph with on the order of `n!` paths. In most real-world scenarios it
+ * is likely that most of those possible branches will be trimmed immediately, and
+ * only on the order of n^2 branches will actually be evaluated, but this combinatorial
+ * reduction will not occur if several member expressions overlap in the inputs that they
+ * match. e.g. if two members are literal expressions with regexes `/foo/` and `/foobar/`,
+ * then when the input is 'foobarbaz', the first expression will match and consume "foo"
+ * and the second will match and consume "foobar", and each of those two branches becomes
+ * the root of a new permutations expression graph which matches the remaining member
+ * expressoins against the remainder of the input.
+ */
+export function permutations<State = object, CustomSuggestion = object>(
+  options: {
+    /**
+     * Member expressions that must appear in the input in some order for the
+     * returned permutations expression to fully match the input
+     */
+    requiredMembers?: Expression<State, CustomSuggestion>[];
+    /**
+     * Member expressions that may appear in the input in any order relative to
+     * the requiredMembers.
+     */
+    optionalMembers?: Expression<State, CustomSuggestion>[];
+    /**
+     * An ID that is unique to this permutations expression within the expression
+     * graph. Mainly intended to aid debugability of dynamic expression; If not
+     * provided, a random ID will be assigned.
+     */
+    id?: string;
+  },
+): ExpressionWithId<State, CustomSuggestion> {
+  const {
+    requiredMembers = [],
+    optionalMembers = [],
+    id = crypto.randomUUID(),
+  } = options;
+  const required = requiredMembers.map((expr, i) => ({
+    ...expr,
+    id: expr.id ?? `${id}.required.${i}`,
+  }));
+  const optional = optionalMembers.map((expr, i) => ({
+    ...expr,
+    id: expr.id ?? `${id}.optional.${i}`,
+  }));
+
+  return _permutations(
+    required,
+    optional,
+    id,
+    1,
+  );
+}
+
+function _permutations<State = object, CustomSuggestion = object>(
+  requiredMembers: ExpressionWithId<State, CustomSuggestion>[],
+  optionalMembers: ExpressionWithId<State, CustomSuggestion>[],
+  baseId: string,
+  epoch: number,
+): ExpressionWithId<State, CustomSuggestion> {
+  const dynamicExpr = dynamic<State, CustomSuggestion>(
+    (_, wasAlreadyMatched) => {
+      const remainingRequiredMembers = requiredMembers.filter((expr) =>
+        !wasAlreadyMatched(expr.id)
+      );
+      const remainingOptionalMembers = optionalMembers.filter((expr) =>
+        !wasAlreadyMatched(expr.id)
+      );
+
+      if (
+        !remainingRequiredMembers.length && !remainingOptionalMembers.length
+      ) {
+        return EMPTY_LITERAL as Expression<State, CustomSuggestion>;
+      }
+
+      const nextMatchExpr = union(
+        ...remainingRequiredMembers,
+        ...remainingOptionalMembers,
+      );
+
+      const permutationsExp = sequence(
+        nextMatchExpr,
+        _permutations(
+          remainingRequiredMembers,
+          remainingOptionalMembers,
+          baseId,
+          epoch + 1,
+        ),
+      );
+
+      return remainingRequiredMembers.length
+        ? permutationsExp
+        : optional(permutationsExp);
+    },
+  );
+
+  return {
+    ...dynamicExpr,
+    id: `${baseId}[epoch-${epoch}]`,
+  };
 }
