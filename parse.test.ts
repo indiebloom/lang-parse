@@ -5,6 +5,7 @@ import {
   literal,
   optional,
   permutations,
+  repeated,
   sequence,
   union,
 } from "./expression.ts";
@@ -843,6 +844,125 @@ Deno.test("conditional expression evaluation", async (t) => {
       );
     },
   );
+});
+
+Deno.test("evaluation of repeated", async (t) => {
+  await t.step(
+    "should vacuously match input that doesn't match the given expression when the min is 0",
+    () => {
+      const expr = sequence(
+        repeated(
+          literal(/foo/, {
+            stateUpdater: buildMatchRecorder(0),
+          }),
+        ),
+        literal(/bar/, {
+          stateUpdater: buildMatchRecorder(1),
+        }),
+      );
+
+      const result = parse(expr, INITIAL_STATE, "bar");
+      assertObjectEquals(
+        result,
+        {
+          matchingPart: "bar",
+          remainder: "",
+          state: { matchingExpressions: [1] },
+          suggestions: [],
+        } satisfies ParseResult<TestState>,
+      );
+    },
+  );
+
+  await t.step("should vacuously not-match when max is 0", () => {
+    const expr = sequence(
+      repeated(
+        literal(/foo/, {
+          stateUpdater: buildMatchRecorder(0),
+        }),
+        { max: 0 },
+      ),
+      literal(/bar/, {
+        stateUpdater: buildMatchRecorder(1),
+      }),
+    );
+
+    const result = parse(expr, INITIAL_STATE, "foo");
+    assertObjectEquals(
+      result,
+      {
+        matchingPart: "",
+        remainder: "foo",
+        state: INITIAL_STATE,
+        suggestions: [],
+      } satisfies ParseResult<TestState>,
+    );
+  });
+
+  await t.step(
+    "should not match when the expression matches fewer than min repetitions",
+    () => {
+      const expr = sequence(
+        repeated(
+          literal(/foo/, {
+            stateUpdater: buildMatchRecorder(0),
+            suggestions: ["foo"],
+          }),
+          { min: 2 },
+        ),
+        literal(/bar/, {
+          stateUpdater: buildMatchRecorder(1),
+        }),
+      );
+
+      const result = parse(expr, INITIAL_STATE, "foobar");
+      assertObjectEquals(
+        result,
+        {
+          matchingPart: "foo",
+          remainder: "bar",
+          state: { matchingExpressions: [0] },
+          suggestions: [{ label: "foo" }],
+        } satisfies ParseResult<TestState>,
+      );
+    },
+  );
+
+  await t.step("should match up to max times", () => {
+    const expr = sequence(
+      repeated(
+        literal(/foo/, {
+          stateUpdater: buildMatchRecorder(0),
+        }),
+        { min: 1, max: 3 },
+      ),
+      literal(/bar/, {
+        stateUpdater: buildMatchRecorder(1),
+      }),
+    );
+
+    const result1 = parse(expr, INITIAL_STATE, "foobar");
+    assertObjectEquals(
+      result1,
+      {
+        matchingPart: "foobar",
+        remainder: "",
+        state: { matchingExpressions: [0, 1] },
+        suggestions: [],
+      } satisfies ParseResult<TestState>,
+    );
+
+    const result2 = parse(expr, INITIAL_STATE, "foofoofoofoo");
+    assertObjectEquals(
+      result2,
+      {
+        matchingPart: "foofoofoo",
+        remainder: "foo",
+        state: { matchingExpressions: [0, 0, 0] },
+        suggestions: [],
+      } satisfies ParseResult<TestState>,
+    );
+  });
 });
 
 Deno.test("evaluation of permutations", async (t) => {

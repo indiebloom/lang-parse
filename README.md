@@ -9,6 +9,7 @@
   - [Utility Expression Types](#utility-expression-types)
     - [Optional Expressions](#optional-expressions)
     - [Conditional Expressions](#conditional-expressions)
+    - [Repeated Expressions](#repeated-expressions)
     - [Permutations Expressions](#permutations-expressions)
   - [Parser Result](#parser-result)
 
@@ -52,6 +53,7 @@ expressions alone.
 
 - [Optional](#optional-expressions) Expressions
 - [Conditional](#conditional-expressions) Expressions
+- [Repeated](#repeated-expressions) Expressions
 - [Permutations](#permutations-expressions) Expresssions
 
 Every Expression is evaluated against its input to produce one or more
@@ -113,8 +115,8 @@ it would match:
 
 ```javascript
 literal(/(\d{1,2})(a|p)m\b\s*/, {
-    suggestions: ['6pm', '10am]
-})
+  suggestions: ["6pm", "10am"],
+});
 ```
 
 These suggestions can be used in an application utilizing lang-parse to teach
@@ -133,15 +135,15 @@ following Literal Expression:
 
 ```javascript
 function possibleTimeUnitsForCount(i) {
-    const possibleUnits = ['years'];
+    const possibleUnits = ["years"];
     if (i <= 12) {
-        possibleUnits.append('months');
+        possibleUnits.append("months");
     }
     if (i <= 52) {
-        possibleUnits.append('weeks');
+        possibleUnits.append("weeks");
     }
     if (i <= 365) {
-        possibleUnits.append('days');
+        possibleUnits.append("days");
     }
     return possibleUnits;
 }
@@ -149,7 +151,7 @@ function possibleTimeUnitsForCount(i) {
 literal(
     state => {
         const possibleUnits = possibleTimeUnitsForCount(state.i);
-        return new RegExp(`(${possibleUnits.join('|')})\b\s*`);
+        return new RegExp(`(${possibleUnits.join("|")})\b\s*`);
     },
     {
         suggestions: state => possibleTimeUnitsForCount(state.i)
@@ -246,6 +248,10 @@ using Dynamic Expressions.
 TODO
 
 ### Conditional Expressions
+
+TODO
+
+### Repeated Expressions
 
 TODO
 

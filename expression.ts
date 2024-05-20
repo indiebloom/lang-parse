@@ -86,6 +86,7 @@ export function optional<State = object, CustomSuggestion = object>(
 /**
  * Dynamically chooses between two possible expression to evaluate, based on the current
  * state.
+ *
  * @param options
  * @returns The expression chosen based on the given conditional options and the
  * current state.
@@ -122,6 +123,55 @@ export function conditional<State = object, CustomSuggestion = object>(
       return options.ifFalse;
     }
   });
+}
+
+/**
+ * Produces an expression that matches sequential segments of the input
+ * between a minimum and maximum number of times.
+ *
+ * e.g. The expression `repeated(literal(/foo/), { min: 2, max: 4 })` will match
+ * "foofoo", "foofoofoo", and "foofoofoofoo", but not "foo" or "foofoofoofoofoo".
+ */
+export function repeated<State = object, CustomSuggestion = object>(
+  expression: Expression<State, CustomSuggestion>,
+  options?: {
+    /** The minimum number of times that the given expression must match. Defaults to 0.  */
+    min?: number;
+    /**
+     * The maximum number of times that the given expression will be matched. Defaults to infinity,
+     * meaning that as long as the next segment of the input matches the given expression, the
+     * produced expression will continue to accumulate matching segments.
+     */
+    max?: number;
+  },
+): Expression<State, CustomSuggestion> {
+  const { min = 0, max = Infinity } = options ?? {};
+  if (min < 0) {
+    throw new Error("Minimum number of repetitions must be non-negative");
+  } else if (max < min) {
+    throw new Error(
+      "Maximum number of repetitions must be greater than the minimum",
+    );
+  }
+
+  const nextExpr = max === 0
+    ? TERMINAL_LITERAL as Expression<State, CustomSuggestion>
+    : sequence(
+      expression,
+      // Note: a dynamic expression is used here so that the "more" part of the expression
+      // is only generated if the "first" part of the expression matches the input. This
+      // is important when `options.max` is infinity (or even just a large number) because
+      // we don't want to generate a large number of expressions that will never be reached
+      // during parsing.
+      dynamic(() =>
+        repeated(expression, {
+          min: Math.max(0, min - 1),
+          max: Math.max(0, max - 1),
+        })
+      ),
+    );
+
+  return min === 0 ? optional(nextExpr) : nextExpr;
 }
 
 /**
