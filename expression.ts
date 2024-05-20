@@ -1,4 +1,4 @@
-import { crypto, Draft, Immutable } from "./deps.ts";
+import { Draft, Immutable } from "./deps.ts";
 import {
   DynamicExpression,
   Expression,
@@ -223,7 +223,7 @@ export function permutations<State = object, CustomSuggestion = object>(
   const {
     requiredMembers = [],
     optionalMembers = [],
-    id = crypto.randomUUID(),
+    id = `permuations-${randomString(8)}`,
   } = options;
   const required = requiredMembers.map((expr, i) => ({
     ...expr,
@@ -288,4 +288,11 @@ function _permutations<State = object, CustomSuggestion = object>(
     ...dynamicExpr,
     id: `${baseId}[epoch-${epoch}]`,
   };
+}
+
+function randomString(length: number) {
+  return Array.from(
+    { length },
+    () => String.fromCharCode(Math.floor(Math.random() * 26) + 97),
+  ).join("");
 }

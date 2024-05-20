@@ -322,13 +322,13 @@ optional instead of a required member. Then our tree would look like this:
 
 ```
 ROOT | --> A | --> B --> C
-             |     | --> ∅
-             |
+     |       |     | --> ∅
+     |       |
      |       | --> C --> B
      |
      | --> B | --> A --> C
-             |     | --> ∅
-             |
+     |       |     | --> ∅
+     |       |
      |       | --> C --> A
      |
      | --> C | --> A --> B

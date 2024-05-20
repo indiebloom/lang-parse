@@ -1,5 +1,5 @@
-export * from "https://deno.land/std@0.223.0/assert/mod.ts";
-import { assertEquals } from "https://deno.land/std@0.223.0/assert/mod.ts";
+export * from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 
 export const pp = (o: object) => JSON.stringify(o, null, 2);
 
