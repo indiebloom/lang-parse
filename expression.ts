@@ -176,7 +176,7 @@ export function repeated<State = object, CustomSuggestion = object>(
 
 /**
  * Produces an expression that matches any permutation of the given expressions.
- * E.g. if options.requiredMembers = [`A`, `B`] and options.optionalMembers = [`c`]
+ * E.g. if options.requiredMembers = [`A`, `B`] and options.optionalMembers = [`C`]
  *
  * Then the resulting expression will match inputs that match `A`, `B`, and `C`
  * in any of the following orders:
