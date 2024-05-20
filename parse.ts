@@ -10,43 +10,111 @@ import {
 import { ParseResult } from "./types/parse.ts";
 import { Suggestion, SuggestionObj } from "./types/suggestion.ts";
 
+interface FinalizedExpressionResult<State, CustomSuggestion> {
+  parent?: InitialExpressionResult<State, CustomSuggestion>;
+  get isMatch(): boolean;
+  get branchResults(): LiteralResult<State, CustomSuggestion>[];
+  get longestMatchResults(): LiteralResult<State, CustomSuggestion>[];
+  get bestResult(): LiteralResult<State, CustomSuggestion>;
+  get matchingBranchResults(): LiteralResult<State, CustomSuggestion>[];
+  get nonMatchingBranchResults(): LiteralResult<State, CustomSuggestion>[];
+  get suggestions(): SuggestionObj<CustomSuggestion>[];
+}
+
+interface InitialExpressionResult<State, CustomSuggestion> {
+  get nodeId(): string;
+  finalize(
+    branchResults: LiteralResult<State, CustomSuggestion>[],
+  ): FinalizedExpressionResult<State, CustomSuggestion>;
+
+  get isFinalized(): boolean;
+
+  /**
+   * Throws an exception if the result has not been finalized. Otherwise returns
+   * the result.
+   */
+  get finalized(): FinalizedExpressionResult<State, CustomSuggestion>;
+}
+
 /**
- * The result of evaluating an expression against an input string
+ * The result of evaluating an expression against an input string.
+ *
+ * Each time a @type {Expression} is encountered by the parser in a particular
+ * path through the expression graph, an @type {ExpressionResult} is initialized
+ * to hold the results of evaluating that expression against its input. When
+ * evaluation of the expression is complete, the @type {ExpressionResult} is
+ * "finalized" with the evaluation results for every branch of the expression
+ * graph rooted at that expression.
  */
-class ExpressionResult<State, CustomSuggestion> {
+class ExpressionResult<State, CustomSuggestion>
+  implements
+    InitialExpressionResult<State, CustomSuggestion>,
+    FinalizedExpressionResult<State, CustomSuggestion> {
   readonly expression: Expression<State, CustomSuggestion>;
   readonly nodeId: string;
-  readonly terminalResults: LiteralResult<State, CustomSuggestion>[];
-  readonly longestMatchResults;
-  parent?: ExpressionResult<State, CustomSuggestion>;
+  readonly parent?: InitialExpressionResult<State, CustomSuggestion>;
+  _branchResults: LiteralResult<State, CustomSuggestion>[] | undefined =
+    undefined;
+  private _memoizedLongestBranchResults: LiteralResult<
+    State,
+    CustomSuggestion
+  >[] | undefined = undefined;
 
   constructor(
     expression: Expression<State, CustomSuggestion>,
     nodeId: string,
-    terminalLiteralResults: PossiblyUnattachedLiteralResult<
-      State,
-      CustomSuggestion
-    >[],
+    parent: InitialExpressionResult<State, CustomSuggestion> | undefined,
   ) {
     this.expression = expression;
     this.nodeId = nodeId;
+    this.parent = parent;
+  }
 
-    this.terminalResults = terminalLiteralResults.map((result) => {
-      result.container ??= this;
-      return result as LiteralResult<State, CustomSuggestion>;
-    });
+  finalize(
+    branchResults: LiteralResult<State, CustomSuggestion>[],
+  ): FinalizedExpressionResult<State, CustomSuggestion> {
+    if (this.isFinalized) {
+      throw new Error("Cannot finalize an already finalized result");
+    }
+    this._branchResults = branchResults;
+    return this;
+  }
 
-    const greatestMatchEnd = this.terminalResults.reduce(
-      (greatest, result) => Math.max(greatest, result.matchEnd),
-      0,
-    );
-    this.longestMatchResults = this.terminalResults.filter((result) =>
-      result.matchEnd === greatestMatchEnd
-    );
+  get isFinalized() {
+    return this._branchResults !== undefined;
+  }
+
+  get finalized(): FinalizedExpressionResult<State, CustomSuggestion> {
+    if (this._branchResults === undefined) {
+      throw new Error("Cannot access branch results before finalizing");
+    }
+
+    return this;
+  }
+
+  get branchResults() {
+    if (this._branchResults === undefined) {
+      throw new Error("Cannot access branch results before finalizing");
+    }
+
+    return this._branchResults;
   }
 
   get isMatch() {
-    return this.terminalResults.some((result) => result.isMatch);
+    return this.branchResults.some((result) => result.isMatch);
+  }
+
+  get longestMatchResults() {
+    if (this._memoizedLongestBranchResults === undefined) {
+      const greatestMatchEnd = this.branchResults.reduce(
+        (greatest, result) => Math.max(greatest, result.matchEnd),
+        0,
+      );
+      this._memoizedLongestBranchResults = this.branchResults.filter((result) =>
+        result.matchEnd === greatestMatchEnd
+      );
+    }
+    return this._memoizedLongestBranchResults;
   }
 
   get suggestions() {
@@ -55,31 +123,17 @@ class ExpressionResult<State, CustomSuggestion> {
     );
   }
 
-  get bestTerminalResult() {
+  get bestResult() {
     return this.longestMatchResults.find((result) => result.isMatch) ??
       this.longestMatchResults[0];
   }
 
-  get matchingTerminalResults() {
-    return this.terminalResults.filter((result) => result.isMatch);
+  get matchingBranchResults() {
+    return this.branchResults.filter((result) => result.isMatch);
   }
 
-  get nonMatchingTerminalResults() {
-    return this.terminalResults.filter((result) => !result.isMatch);
-  }
-
-  extend(
-    fn: (
-      latestLiteralResult: LiteralResult<State, CustomSuggestion>,
-    ) => ExpressionResult<State, CustomSuggestion>,
-  ) {
-    const newResults = [
-      ...this.nonMatchingTerminalResults,
-      ...this.matchingTerminalResults.map(fn).flatMap((result) =>
-        result.terminalResults
-      ),
-    ];
-    return new ExpressionResult(this.expression, this.nodeId, newResults);
+  get nonMatchingBranchResults() {
+    return this.branchResults.filter((result) => !result.isMatch);
   }
 }
 
@@ -92,10 +146,10 @@ class ExpressionResult<State, CustomSuggestion> {
  */
 type LiteralResult<State, CustomSuggestion> = {
   /**
-   * The @type {ExpressionResult} of the @type {LiteralExpression} that
+   * The @type {InitialExpressionResult} of the @type {LiteralExpression} that
    * this result corresponds to
    */
-  container: ExpressionResult<State, CustomSuggestion>;
+  container: InitialExpressionResult<State, CustomSuggestion>;
   /**
    * The results from the previous literal expression in the current
    * branch of the expression graph
@@ -117,10 +171,6 @@ type LiteralResult<State, CustomSuggestion> = {
   state: State;
 };
 
-type PossiblyUnattachedLiteralResult<State, CustomSuggestion> =
-  & Omit<LiteralResult<State, CustomSuggestion>, "container">
-  & { container?: ExpressionResult<State, CustomSuggestion> };
-
 /**
  * Parse the given input string against the given expression
  *
@@ -139,13 +189,13 @@ export function parse<State = object, CustomSuggestion = object>(
   );
   const result = parseInternal(
     expression,
-    startResult.bestTerminalResult,
-    undefined,
+    startResult.bestResult,
+    startResult.parent,
     0,
     input,
   );
 
-  const best = result.bestTerminalResult;
+  const best = result.bestResult;
 
   return {
     matchingPart: input.slice(0, best.matchEnd),
@@ -163,30 +213,31 @@ export function parse<State = object, CustomSuggestion = object>(
 function parseInternal<State, CustomSuggestion>(
   expression: Expression<State, CustomSuggestion>,
   prev: LiteralResult<State, CustomSuggestion>,
-  parentNodeId: string | undefined,
+  parent: InitialExpressionResult<State, CustomSuggestion> | undefined,
   ordinal: number,
   input: string,
-): ExpressionResult<State, CustomSuggestion> {
+): FinalizedExpressionResult<State, CustomSuggestion> {
   const nodeId = expression.id ??
-    (parentNodeId ? `${parentNodeId}.${ordinal}` : "●");
+    (parent ? `${parent.nodeId}.${ordinal}` : "●");
+  const result = new ExpressionResult(expression, nodeId, parent);
   switch (expression.type) {
     case "literal":
-      return parseLiteral(expression, prev, nodeId, input);
+      return parseLiteral(expression, prev, input, result);
     case "sequence":
-      return parseSequence(expression, prev, nodeId, input);
+      return parseSequence(expression, prev, input, result);
     case "union":
-      return parseUnion(expression, prev, nodeId, input);
+      return parseUnion(expression, prev, input, result);
     case "dynamic":
-      return parseDynamic(expression, prev, nodeId, input);
+      return parseDynamic(expression, prev, input, result);
   }
 }
 
 function parseLiteral<State, CustomSuggestion>(
   expression: LiteralExpression<State, CustomSuggestion>,
   prev: LiteralResult<State, CustomSuggestion>,
-  nodeId: string,
   input: string,
-): ExpressionResult<State, CustomSuggestion> {
+  result: InitialExpressionResult<State, CustomSuggestion>,
+): FinalizedExpressionResult<State, CustomSuggestion> {
   const { state, matchEnd: prevMatchEnd } = prev;
   const regexp = typeof expression.regexp === "function"
     ? expression.regexp(castImmutable(prev.state))
@@ -206,109 +257,100 @@ function parseLiteral<State, CustomSuggestion>(
       state,
       (draftState) => expression.stateUpdater(draftState, matchGroups),
     );
-    const literalResult: PossiblyUnattachedLiteralResult<
+    const literalResult: LiteralResult<
       State,
       CustomSuggestion
     > = {
+      container: result,
       matchEnd: matchingPart.length + prevMatchEnd,
       isMatch: true,
       state: updatedState,
       suggestions: [],
       prev,
     };
-    return new ExpressionResult(expression, nodeId, [literalResult]);
+
+    return result.finalize([literalResult]);
   }
 
   const suggestions = typeof expression.suggestions === "function"
     ? expression.suggestions(castImmutable(state), input)
     : expression.suggestions;
-  const literalResult: PossiblyUnattachedLiteralResult<
+  const literalResult: LiteralResult<
     State,
     CustomSuggestion
   > = {
+    container: result,
     matchEnd: prev.matchEnd,
     isMatch: false,
     state,
     prev,
     suggestions: suggestions.map(suggestionAsObj),
   };
-  return new ExpressionResult(expression, nodeId, [literalResult]);
+  return result.finalize([literalResult]);
 }
 
 function parseSequence<State, CustomSuggestion>(
   expression: SequenceExpression<State, CustomSuggestion>,
   prev: LiteralResult<State, CustomSuggestion>,
-  nodeId: string,
   input: string,
-): ExpressionResult<State, CustomSuggestion> {
+  result: InitialExpressionResult<State, CustomSuggestion>,
+): FinalizedExpressionResult<State, CustomSuggestion> {
   if (expression.sequence.length === 0) {
     throw new Error("Sequence expression must have at least one child");
   }
 
-  let result = parseInternal(expression.sequence[0], prev, nodeId, 0, input);
-  const childResults: ExpressionResult<State, CustomSuggestion>[] = [result];
-  for (let i = 1; i < expression.sequence.length; i++) {
-    if (!result.isMatch) {
+  let liveBranchResults = [prev];
+  const deadBranchResults = [];
+  for (let i = 0; i < expression.sequence.length; i++) {
+    const childExpression = expression.sequence[i];
+
+    const childResults = liveBranchResults.map((branchResult) =>
+      parseInternal(childExpression, branchResult, result, i, input)
+    );
+
+    liveBranchResults = childResults.flatMap((childResult) =>
+      childResult.matchingBranchResults
+    );
+
+    deadBranchResults.push(
+      ...childResults.flatMap((childResult) =>
+        childResult.nonMatchingBranchResults
+      ),
+    );
+
+    if (liveBranchResults.length === 0) {
       break;
     }
-    result = result.extend(
-      (latestLiteralResult) => {
-        const childResult = parseInternal(
-          expression.sequence[i],
-          latestLiteralResult,
-          nodeId,
-          i,
-          input,
-        );
-        childResults.push(childResult);
-        return childResult;
-      },
-    );
-  }
-  // The results of any evaluation of a sequence expression member should have
-  // the sequence expression's result as their parent.
-  // TODO: assigning parents after the fact like this seems error-prone. Think
-  //  about how to improve.
-  for (const childResult of childResults) {
-    childResult.parent = result;
   }
 
-  return result;
+  return result.finalize(liveBranchResults.concat(deadBranchResults));
 }
 
 function parseUnion<State, CustomSuggestion>(
   expression: UnionExpression<State, CustomSuggestion>,
   prev: LiteralResult<State, CustomSuggestion>,
-  nodeId: string,
   input: string,
-): ExpressionResult<State, CustomSuggestion> {
+  result: InitialExpressionResult<State, CustomSuggestion>,
+): FinalizedExpressionResult<State, CustomSuggestion> {
   if (expression.alternates.length === 0) {
     throw new Error("Union expression must have at least one child");
   }
 
   const childResults = expression.alternates.map((alternate, i) =>
-    parseInternal(alternate, prev, nodeId, i, input)
+    parseInternal(alternate, prev, result, i, input)
   );
 
-  const result = new ExpressionResult(
-    expression,
-    nodeId,
-    childResults.flatMap((childResult) => childResult.terminalResults),
+  return result.finalize(
+    childResults.flatMap((childResult) => childResult.branchResults),
   );
-
-  for (const childResult of childResults) {
-    childResult.parent = result;
-  }
-
-  return result;
 }
 
 function parseDynamic<State, CustomSuggestion>(
   expression: DynamicExpression<State, CustomSuggestion>,
   prev: LiteralResult<State, CustomSuggestion>,
-  nodeId: string,
   input: string,
-): ExpressionResult<State, CustomSuggestion> {
+  result: InitialExpressionResult<State, CustomSuggestion>,
+): FinalizedExpressionResult<State, CustomSuggestion> {
   const matchedNodeIds = getAllMatchedNodeIds(
     prev,
   );
@@ -322,18 +364,12 @@ function parseDynamic<State, CustomSuggestion>(
   const childResult = parseInternal(
     generatedExpression,
     prev,
-    nodeId,
+    result,
     0,
     input,
   );
 
-  const result = new ExpressionResult(
-    expression,
-    nodeId,
-    childResult.terminalResults,
-  );
-  childResult.parent = result;
-  return result;
+  return result.finalize(childResult.branchResults);
 }
 
 /**
@@ -343,21 +379,23 @@ function parseDynamic<State, CustomSuggestion>(
 function noopExpressionResult<State, CustomSuggestion>(
   initialState: State,
 ) {
-  const startingLiteralResult: PossiblyUnattachedLiteralResult<
+  const result = new ExpressionResult<State, CustomSuggestion>(
+    literal(/()/), // Dummy expression
+    "∅",
+    undefined,
+  );
+  const startingLiteralResult: LiteralResult<
     State,
     CustomSuggestion
   > = {
+    container: result,
     matchEnd: 0,
     isMatch: true,
     state: initialState,
     suggestions: [],
     prev: undefined,
   };
-  return new ExpressionResult<State, CustomSuggestion>(
-    literal(/()/), // Dummy expression
-    "∅",
-    [startingLiteralResult],
-  );
+  return result.finalize([startingLiteralResult]);
 }
 
 /** Convert a suggestion to a @type {SuggestionObj} */
@@ -441,18 +479,22 @@ function getAllMatchedNodeIds<
     if (isMatch) {
       matchedNodeIds.add(container.nodeId);
 
-      let parentResult = container.parent;
-      while (parentResult !== undefined) {
-        if (!matchedNodeIds.has(parentResult.nodeId)) {
-          if (parentResult.isMatch) {
-            matchedNodeIds.add(parentResult.nodeId);
-          }
-        } else {
-          // Already encountered this parent expression, so its ancestors will
+      let expressionResult:
+        | InitialExpressionResult<State, CustomSuggestion>
+        | undefined = container;
+      while (expressionResult !== undefined && expressionResult.isFinalized) {
+        const nodeId = expressionResult.nodeId;
+
+        if (matchedNodeIds.has(nodeId)) {
+          // Already encountered this expression result, so its ancestors will
           // also have been processed
           break;
         }
-        parentResult = parentResult.parent;
+
+        if (expressionResult.finalized.isMatch) {
+          matchedNodeIds.add(nodeId);
+        }
+        expressionResult = expressionResult.finalized.parent;
       }
     }
     currentLiteralResult = currentLiteralResult.prev;
